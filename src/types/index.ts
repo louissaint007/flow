@@ -7,3 +7,9 @@ export interface MockApp {
   isSystemApp?: boolean;
   category?: string;
 }
+
+export interface CustomProfile {
+  id: string;
+  name:string;
+  appIds: string[];
+}
