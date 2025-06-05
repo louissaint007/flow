@@ -1,3 +1,4 @@
+
 import type { MockApp } from '@/types';
 import {
   Settings,
@@ -17,6 +18,7 @@ import {
   BookOpen,
   ShoppingBag,
   Smartphone,
+  Smile, // Added for Kid's Mode
 } from 'lucide-react';
 
 export const USER_APPS_LIST: MockApp[] = [
@@ -40,3 +42,13 @@ export const SYSTEM_APPS_LIST: MockApp[] = [
   { id: 'camera', name: 'Camera', icon: Camera, isSystemApp: true },
   { id: 'messages', name: 'Messages', icon: Mail, isSystemApp: true },
 ];
+
+export const KIDS_MODE_DEFAULT_APP_IDS: string[] = ['spotify', 'capcut', 'wildrift', 'messages']; // Example kid-friendly app IDs
+
+// Helper to get app objects for Kid's Mode
+export const getKidsModeApps = (): MockApp[] => {
+  const allApps = [...USER_APPS_LIST, ...SYSTEM_APPS_LIST];
+  return allApps.filter(app => KIDS_MODE_DEFAULT_APP_IDS.includes(app.id));
+};
+
+export const KidsModeIcon = Smile; // Assigning Smile to a more semantic name for Kid's Mode trigger

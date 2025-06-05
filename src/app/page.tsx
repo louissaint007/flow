@@ -13,9 +13,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { USER_APPS_LIST, SYSTEM_APPS_LIST } from '@/lib/constants';
+import { USER_APPS_LIST, SYSTEM_APPS_LIST, getKidsModeApps, KidsModeIcon } from '@/lib/constants';
 import type { MockApp, CustomProfile } from '@/types';
-import { ShieldCheck, ListChecks, Eye, EyeOff, Info, Zap, Palette, UsersIcon, PlusCircle, Edit3, Trash2, PlayCircle, Save, XCircle } from 'lucide-react';
+import { ShieldCheck, ListChecks, Eye, EyeOff, Info, Zap, Palette, UsersIcon, PlusCircle, Edit3, Trash2, PlayCircle, Save, XCircle, Timer as TimerIcon, Lock, Unlock, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function HomePage() {
@@ -33,19 +33,41 @@ export default function HomePage() {
   const [profileSelectedAppIds, setProfileSelectedAppIds] = useState<Set<string>>(new Set());
   const [profileToDelete, setProfileToDelete] = useState<CustomProfile | null>(null);
 
+  // Kid's Mode State
+  const [isKidsModeActive, setIsKidsModeActive] = useState(false);
+  const [kidsModePassword, setKidsModePassword] = useState('');
+  const [isKidsModePasswordSet, setIsKidsModePasswordSet] = useState(false);
+  const [showKidsModeSetupDialog, setShowKidsModeSetupDialog] = useState(false);
+  const [showKidsModeExitDialog, setShowKidsModeExitDialog] = useState(false);
+  const [kidsModeTimerDuration, setKidsModeTimerDuration] = useState(30); // Default 30 mins
+  const [kidsModeTimeRemaining, setKidsModeTimeRemaining] = useState<number | null>(null); // in seconds
+  const [kidsModePasswordInput, setKidsModePasswordInput] = useState(''); // for exit dialog
+  const [tempKidsModePassword, setTempKidsModePassword] = useState(''); // for setup dialog
+  const [tempKidsModeTimerDuration, setTempKidsModeTimerDuration] = useState(30); // for setup dialog
+  const kidsModeAllowedApps = useMemo(() => getKidsModeApps(), []);
+
+
   const { toast } = useToast();
 
   useEffect(() => {
     setMounted(true);
-    // Load profiles from localStorage if needed in the future
   }, []);
 
-  // Effect to save profiles to localStorage (optional for now)
-  // useEffect(() => {
-  //   if (mounted) {
-  //     localStorage.setItem('customProfiles', JSON.stringify(customProfiles));
-  //   }
-  // }, [customProfiles, mounted]);
+  // Kid's Mode Timer Logic
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+    if (isKidsModeActive && kidsModeTimeRemaining !== null && kidsModeTimeRemaining > 0) {
+      intervalId = setInterval(() => {
+        setKidsModeTimeRemaining((prevTime) => (prevTime ? Math.max(0, prevTime - 1) : 0));
+      }, 1000);
+    } else if (isKidsModeActive && kidsModeTimeRemaining === 0) {
+      toast({ title: "Time's Up!", description: "Kid's Mode time has finished. Enter password to exit.", variant: "default", duration: 5000 });
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isKidsModeActive, kidsModeTimeRemaining, toast]);
+
 
   const handleToggleAppSelectionForPage = useCallback((appId: string) => {
     setActiveProfileId(null); 
@@ -72,20 +94,22 @@ export default function HomePage() {
 
   const renderAppGrid = useCallback((
     apps: MockApp[],
-    isFocusView: boolean,
+    isFocusView: boolean, // In focus mode or kids mode, selection is disabled
     currentSelection: Set<string>,
-    onToggle: (appId: string) => void,
-    selectableSystemApps: boolean = false
+    onToggle?: (appId: string) => void, // Optional for views where toggle is not allowed
+    selectableSystemApps: boolean = false,
+    isKidsModeGrid: boolean = false
   ) => (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+    <div className={`grid grid-cols-2 sm:grid-cols-3 ${isKidsModeGrid ? 'md:grid-cols-3 lg:grid-cols-4' : 'md:grid-cols-4 lg:grid-cols-5'} gap-4`}>
       {apps.map((app) => (
         <AppCard
           key={app.id}
           app={app}
           isSelected={currentSelection.has(app.id)}
-          onToggleSelection={!isFocusView && (selectableSystemApps || !app.isSystemApp) ? onToggle : undefined}
-          isFocusModeView={isFocusView}
-          disabled={!selectableSystemApps && app.isSystemApp && !isFocusView}
+          onToggleSelection={!isFocusView && onToggle && (selectableSystemApps || !app.isSystemApp) ? onToggle : undefined}
+          isFocusModeView={isFocusView} // True for focus mode or kids mode active view
+          disabled={(!selectableSystemApps && app.isSystemApp && !isFocusView && !onToggle) || (isFocusView)} // Disabled if system app and not selectable, or if in focus/kids view
+          isKidsModeCard={isKidsModeGrid}
         />
       ))}
     </div>
@@ -122,7 +146,7 @@ export default function HomePage() {
       toast({ title: "Profile Updated", description: `Profile "${profileNameInput.trim()}" has been updated.` });
     } else {
       const newProfile: CustomProfile = {
-        id: Date.now().toString(), // Simple ID generation
+        id: Date.now().toString(),
         name: profileNameInput.trim(),
         appIds: Array.from(profileSelectedAppIds),
       };
@@ -136,6 +160,7 @@ export default function HomePage() {
   const activateProfile = (profile: CustomProfile) => {
     setSelectedAppIds(new Set(profile.appIds));
     setActiveProfileId(profile.id);
+    setIsFocusMode(false); // Ensure focus mode is off
     toast({ title: "Profile Activated", description: `Profile "${profile.name}" is now active.` });
   };
 
@@ -144,10 +169,72 @@ export default function HomePage() {
     setCustomProfiles(customProfiles.filter(p => p.id !== profileToDelete.id));
     if (activeProfileId === profileToDelete.id) {
       setActiveProfileId(null);
-      setSelectedAppIds(new Set()); // Reset selection or to default
+      setSelectedAppIds(new Set());
     }
     toast({ title: "Profile Deleted", description: `Profile "${profileToDelete.name}" has been deleted.`, variant: "destructive" });
     setProfileToDelete(null);
+  };
+
+  // Kid's Mode Functions
+  const handleOpenKidsModeSetup = () => {
+    if (isFocusMode) {
+      toast({ title: "Action Disabled", description: "Disable Focus Mode to activate Kid's Mode.", variant: "default" });
+      return;
+    }
+    setTempKidsModePassword('');
+    setTempKidsModeTimerDuration(kidsModeTimerDuration);
+    setShowKidsModeSetupDialog(true);
+  };
+
+  const handleSaveKidsModeSetup = () => {
+    if (!tempKidsModePassword) {
+      toast({ title: "Error", description: "Password cannot be empty.", variant: "destructive" });
+      return;
+    }
+    if (tempKidsModeTimerDuration <= 0) {
+       toast({ title: "Error", description: "Timer duration must be greater than 0 minutes.", variant: "destructive" });
+      return;
+    }
+    setKidsModePassword(tempKidsModePassword);
+    setKidsModeTimerDuration(tempKidsModeTimerDuration);
+    setIsKidsModePasswordSet(true);
+    setShowKidsModeSetupDialog(false);
+    startKidsMode(tempKidsModeTimerDuration);
+    toast({ title: "Kid's Mode Setup Complete", description: "Kid's Mode is now active!" });
+  };
+  
+  const startKidsMode = (durationMinutes: number) => {
+    setIsKidsModeActive(true);
+    setKidsModeTimeRemaining(durationMinutes * 60);
+    setIsFocusMode(false); // Ensure focus mode is turned off
+    setSelectedAppIds(new Set()); // Clear general selections
+    setActiveProfileId(null); // Deactivate any active profile
+    toast({ title: "Kid's Mode Activated", description: "Enjoy a safe and focused experience!" });
+  };
+
+  const handleAttemptExitKidsMode = () => {
+    setKidsModePasswordInput('');
+    setShowKidsModeExitDialog(true);
+  };
+
+  const handleConfirmExitKidsMode = () => {
+    if (kidsModePasswordInput === kidsModePassword) {
+      setIsKidsModeActive(false);
+      setKidsModeTimeRemaining(null);
+      setShowKidsModeExitDialog(false);
+      setKidsModePasswordInput('');
+      toast({ title: "Kid's Mode Deactivated", description: "Welcome back!" });
+    } else {
+      toast({ title: "Incorrect Password", description: "Please try again.", variant: "destructive" });
+      setKidsModePasswordInput('');
+    }
+  };
+
+  const formatTime = (totalSeconds: number | null): string => {
+    if (totalSeconds === null) return '00:00';
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   };
 
 
@@ -159,10 +246,70 @@ export default function HomePage() {
     );
   }
 
+  if (isKidsModeActive) {
+    return (
+      <div className="fixed inset-0 bg-gradient-to-br from-blue-300 via-indigo-400 to-purple-400 flex flex-col items-center justify-center p-4 text-white transition-all duration-500 ease-in-out">
+        <div className="absolute top-6 right-6">
+          <Button onClick={handleAttemptExitKidsMode} variant="outline" className="bg-white/20 hover:bg-white/30 text-white border-white">
+            <Unlock className="mr-2 h-5 w-5" /> Exit Kid's Mode
+          </Button>
+        </div>
+        <KidsModeIcon className="w-24 h-24 text-yellow-300 mb-6" />
+        <h1 className="text-5xl font-bold mb-4">Kid's Mode</h1>
+        {kidsModeTimeRemaining !== null && kidsModeTimeRemaining > 0 && (
+          <div className="mb-8 p-4 bg-white/20 rounded-lg shadow-xl">
+            <TimerIcon className="w-10 h-10 text-yellow-300 mb-2 mx-auto" />
+            <p className="text-4xl font-bold text-center">{formatTime(kidsModeTimeRemaining)}</p>
+            <p className="text-center text-sm">Time Remaining</p>
+          </div>
+        )}
+        {kidsModeTimeRemaining === 0 && (
+           <div className="mb-8 p-6 bg-red-500/80 rounded-lg shadow-xl flex flex-col items-center">
+            <ShieldAlert className="w-12 h-12 text-white mb-3" />
+            <p className="text-3xl font-bold text-center text-white">Time's Up!</p>
+            <p className="text-white/90 text-center mt-1">Please ask a grown-up to exit.</p>
+          </div>
+        )}
+        <div className="w-full max-w-2xl p-6 bg-white/10 rounded-xl shadow-lg">
+          <h2 className="text-2xl font-semibold mb-6 text-center">Allowed Apps</h2>
+          {kidsModeAllowedApps.length > 0 ? (
+            renderAppGrid(kidsModeAllowedApps, true, new Set(kidsModeAllowedApps.map(a => a.id)), undefined, false, true)
+          ) : (
+            <p className="text-center py-4">No apps configured for Kid's Mode.</p>
+          )}
+        </div>
+         <Dialog open={showKidsModeExitDialog} onOpenChange={setShowKidsModeExitDialog}>
+          <DialogContent className="bg-slate-800 border-slate-700 text-white">
+            <DialogHeader>
+              <DialogTitle className="text-xl">Enter Password to Exit Kid's Mode</DialogTitle>
+            </DialogHeader>
+            <div className="py-4 space-y-3">
+              <Label htmlFor="kidsModeExitPassword">Password</Label>
+              <Input 
+                id="kidsModeExitPassword" 
+                type="password" 
+                value={kidsModePasswordInput}
+                onChange={(e) => setKidsModePasswordInput(e.target.value)}
+                className="bg-slate-700 border-slate-600 text-white placeholder-slate-400"
+                placeholder="Enter password" 
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowKidsModeExitDialog(false)} className="text-slate-300 border-slate-600 hover:bg-slate-700">Cancel</Button>
+              <Button onClick={handleConfirmExitKidsMode} className="bg-yellow-500 hover:bg-yellow-600 text-slate-900">
+                <Unlock className="mr-2 h-4 w-4" /> Confirm Exit
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
+
   return (
     <div className={cn(
       "flex flex-col min-h-screen bg-background",
-      isGrayscaleMode && "filter grayscale"
+      isGrayscaleMode && !isKidsModeActive && "filter grayscale"
     )}>
       <Header />
       <main className="container mx-auto px-4 pb-12 flex-grow max-w-5xl">
@@ -175,8 +322,18 @@ export default function HomePage() {
             <Switch
               id="focus-mode-toggle"
               checked={isFocusMode}
-              onCheckedChange={setIsFocusMode}
+              onCheckedChange={(checked) => {
+                if (checked && isKidsModeActive) {
+                  toast({ title: "Action Disabled", description: "Kid's Mode is active.", variant: "default" });
+                  return;
+                }
+                setIsFocusMode(checked);
+                if (checked) {
+                  setActiveProfileId(null); // Deactivate profile if manually toggling focus mode
+                }
+              }}
               className="data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted"
+              disabled={isKidsModeActive}
             />
             {isFocusMode ? <Eye className="w-7 h-7 text-primary" /> : <EyeOff className="w-7 h-7 text-muted-foreground" />}
           </div>
@@ -196,6 +353,7 @@ export default function HomePage() {
               checked={isGrayscaleMode}
               onCheckedChange={setIsGrayscaleMode}
               className="data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted"
+              disabled={isKidsModeActive}
             />
             <Palette className={cn("w-6 h-6", isGrayscaleMode ? "text-primary" : "text-muted-foreground")} />
           </div>
@@ -205,23 +363,43 @@ export default function HomePage() {
               : 'Enable to simulate a grayscale display for reduced distraction.'}
           </p>
         </div>
+        
+        {/* Kid's Mode Activation Section */}
+        <div className="mb-12 p-6 bg-card rounded-xl shadow-md border border-border">
+          <div className="flex flex-col sm:flex-row justify-between items-center">
+            <div className="flex items-center mb-4 sm:mb-0">
+              <KidsModeIcon className="w-8 h-8 mr-3 text-primary" />
+              <h2 className="text-2xl font-semibold text-foreground">Kid's Mode</h2>
+            </div>
+            <Button 
+              onClick={isKidsModePasswordSet ? () => startKidsMode(kidsModeTimerDuration) : handleOpenKidsModeSetup} 
+              variant="default" 
+              size="lg"
+              disabled={isFocusMode}
+              className="bg-gradient-to-r from-pink-500 to-yellow-500 hover:from-pink-600 hover:to-yellow-600 text-white transition-all"
+            >
+              {isKidsModePasswordSet ? 'Start Kid\'s Mode' : 'Setup Kid\'s Mode'}
+            </Button>
+          </div>
+           {isFocusMode && <p className="text-sm text-destructive mt-2 text-center sm:text-right">Disable Focus Mode to use Kid's Mode.</p>}
+        </div>
+
 
         <Alert className="mb-10 bg-accent/10 border-accent/30">
           <Info className="h-5 w-5 text-accent" />
           <AlertTitle className="text-accent-foreground/90 font-semibold">Note on Full Functionality</AlertTitle>
           <AlertDescription className="text-accent-foreground/80">
-            For features like automatically scanning installed apps, enforcing device-level access restrictions, or system-wide grayscale, a native mobile application with system permissions is typically required. This web prototype demonstrates the core concepts and UI.
+            For features like automatically scanning installed apps, enforcing device-level access restrictions, system-wide grayscale, or truly locking Kid's Mode, a native mobile application with system permissions is typically required. This web prototype demonstrates the core concepts and UI.
           </AlertDescription>
         </Alert>
 
-        {/* Custom Profiles Section */}
         <div className="mb-12 p-6 bg-card rounded-xl shadow-md border border-border">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-semibold flex items-center text-foreground">
               <UsersIcon className="w-7 h-7 mr-3 text-primary" />
               Custom Profiles
             </h2>
-            <Button onClick={handleOpenCreateProfileDialog} variant="outline" size="sm">
+            <Button onClick={handleOpenCreateProfileDialog} variant="outline" size="sm" disabled={isKidsModeActive || isFocusMode}>
               <PlusCircle className="mr-2 h-4 w-4" /> Create Profile
             </Button>
           </div>
@@ -242,17 +420,24 @@ export default function HomePage() {
                     <Button 
                       variant={activeProfileId === profile.id ? "default" : "outline"} 
                       size="sm" 
-                      onClick={() => activeProfileId === profile.id ? setActiveProfileId(null) : activateProfile(profile)}
+                      onClick={() => {
+                        if (isKidsModeActive) {
+                           toast({ title: "Action Disabled", description: "Kid's Mode is active.", variant: "default" });
+                           return;
+                        }
+                        activeProfileId === profile.id ? setActiveProfileId(null) : activateProfile(profile)
+                      }}
                       className="w-28"
+                      disabled={isKidsModeActive}
                     >
                       {activeProfileId === profile.id ? <XCircle className="mr-2 h-4 w-4" /> : <PlayCircle className="mr-2 h-4 w-4" />}
                       {activeProfileId === profile.id ? 'Deactivate' : 'Activate'}
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleOpenEditProfileDialog(profile)} aria-label="Edit profile">
+                    <Button variant="ghost" size="icon" onClick={() => handleOpenEditProfileDialog(profile)} aria-label="Edit profile" disabled={isKidsModeActive || isFocusMode}>
                       <Edit3 className="h-5 w-5 text-muted-foreground hover:text-primary" />
                     </Button>
                     <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="icon" onClick={() => setProfileToDelete(profile)} aria-label="Delete profile">
+                      <Button variant="ghost" size="icon" onClick={() => setProfileToDelete(profile)} aria-label="Delete profile" disabled={isKidsModeActive || isFocusMode}>
                         <Trash2 className="h-5 w-5 text-muted-foreground hover:text-destructive" />
                       </Button>
                     </AlertDialogTrigger>
@@ -266,10 +451,10 @@ export default function HomePage() {
         <div 
           className={cn(
             "transition-opacity duration-500 ease-in-out",
-            isFocusMode ? 'animate-fade-out opacity-0 hidden' : 'animate-fade-in opacity-100 block'
+            (isFocusMode || isKidsModeActive) ? 'animate-fade-out opacity-0 hidden' : 'animate-fade-in opacity-100 block'
           )}
         >
-          {!isFocusMode && (
+          {!isFocusMode && !isKidsModeActive && (
             <>
               <div className="mb-12">
                  <div className="flex justify-between items-center mb-2">
@@ -311,10 +496,10 @@ export default function HomePage() {
         <div
           className={cn(
             "transition-opacity duration-500 ease-in-out",
-            isFocusMode ? 'animate-fade-in opacity-100 block' : 'animate-fade-out opacity-0 hidden'
+            isFocusMode && !isKidsModeActive ? 'animate-fade-in opacity-100 block' : 'animate-fade-out opacity-0 hidden'
           )}
         >
-          {isFocusMode && (
+          {isFocusMode && !isKidsModeActive &&(
             <div className="mt-8 p-8 bg-card rounded-xl shadow-lg border">
               <div className="mb-8">
                 <h2 className="text-3xl font-bold mb-2 flex items-center text-primary">
@@ -323,7 +508,7 @@ export default function HomePage() {
                 </h2>
                  <p className="text-muted-foreground mb-6 text-lg">Your selected apps for focused work.</p>
                 {whitelistedApps.length > 0 ? (
-                  renderAppGrid(whitelistedApps, true, selectedAppIds, () => {})
+                  renderAppGrid(whitelistedApps, true, selectedAppIds)
                 ) : (
                   <p className="text-muted-foreground text-center py-6 text-lg">No apps whitelisted. Disable Focus Mode to select apps or activate a profile.</p>
                 )}
@@ -335,7 +520,7 @@ export default function HomePage() {
                   System Apps
                 </h2>
                 <p className="text-muted-foreground mb-6 text-lg">Essential system apps remain accessible.</p>
-                {renderAppGrid(SYSTEM_APPS_LIST.filter(app => selectedAppIds.has(app.id) || app.isSystemApp), true, selectedAppIds, () => {}, true)}
+                {renderAppGrid(SYSTEM_APPS_LIST.filter(app => selectedAppIds.has(app.id) || app.isSystemApp), true, selectedAppIds, undefined, true)}
               </div>
             </div>
           )}
@@ -404,7 +589,54 @@ export default function HomePage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <footer className="text-center py-6 text-base text-muted-foreground border-t">
+      {/* Kid's Mode Setup Dialog */}
+      <Dialog open={showKidsModeSetupDialog} onOpenChange={setShowKidsModeSetupDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-2xl">Setup Kid's Mode</DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <Alert variant="default" className="bg-blue-50 border-blue-200 text-blue-700">
+              <ShieldAlert className="h-5 w-5 text-blue-600" />
+              <AlertTitle className="font-semibold">Important Note</AlertTitle>
+              <AlertDescription>
+                Kid's Mode in this web app provides a simulated restricted environment. True device-level restrictions (like preventing app closure or browser navigation) require a native mobile application.
+              </AlertDescription>
+            </Alert>
+            <div>
+              <Label htmlFor="kidsModeSetupPassword">Set Password</Label>
+              <Input 
+                id="kidsModeSetupPassword" 
+                type="password" 
+                value={tempKidsModePassword}
+                onChange={(e) => setTempKidsModePassword(e.target.value)}
+                placeholder="Enter a password for Kid's Mode" 
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="kidsModeSetupTimer">Timer Duration (minutes)</Label>
+              <Input 
+                id="kidsModeSetupTimer" 
+                type="number" 
+                value={tempKidsModeTimerDuration}
+                onChange={(e) => setTempKidsModeTimerDuration(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                min="1"
+                className="mt-1"
+              />
+            </div>
+             <p className="text-sm text-muted-foreground">Allowed apps are preset for Kid's Mode. Timer will start upon setup completion.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowKidsModeSetupDialog(false)}>Cancel</Button>
+            <Button onClick={handleSaveKidsModeSetup}>
+              <Lock className="mr-2 h-4 w-4" /> Save & Activate Kid's Mode
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <footer className={cn("text-center py-6 text-base text-muted-foreground border-t", isKidsModeActive && "hidden")}>
         FocusFlow &copy; {new Date().getFullYear()}
       </footer>
     </div>
