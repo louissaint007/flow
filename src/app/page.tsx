@@ -11,12 +11,13 @@ import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { USER_APPS_LIST, SYSTEM_APPS_LIST } from '@/lib/constants';
 import type { MockApp } from '@/types';
-import { ShieldCheck, ListChecks, Eye, EyeOff, Info, Zap } from 'lucide-react';
+import { ShieldCheck, ListChecks, Eye, EyeOff, Info, Zap, Palette } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function HomePage() {
   const [selectedAppIds, setSelectedAppIds] = useState<Set<string>>(new Set());
   const [isFocusMode, setIsFocusMode] = useState(false);
+  const [isGrayscaleMode, setIsGrayscaleMode] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -67,7 +68,10 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-background">
+    <div className={cn(
+      "flex flex-col min-h-screen bg-background",
+      isGrayscaleMode && "filter grayscale"
+    )}>
       <Header />
       <main className="container mx-auto px-4 pb-12 flex-grow max-w-5xl">
         <div className="flex flex-col items-center mb-10 p-8 bg-card rounded-xl shadow-lg border border-border">
@@ -84,10 +88,27 @@ export default function HomePage() {
             />
             {isFocusMode ? <Eye className="w-7 h-7 text-primary" /> : <EyeOff className="w-7 h-7 text-muted-foreground" />}
           </div>
-          <p className="text-base text-muted-foreground text-center max-w-lg">
+          <p className="text-base text-muted-foreground text-center max-w-lg mb-6">
             {isFocusMode
               ? 'Only whitelisted apps and essential system services are accessible. Enjoy your focused session!'
               : 'Toggle the switch to enter Focus Mode. Select applications below to allow them during your session.'}
+          </p>
+          <div className="flex items-center space-x-4 mb-3">
+            <Label htmlFor="grayscale-mode-toggle" className="text-lg font-medium text-foreground">
+              Grayscale Mode
+            </Label>
+            <Switch
+              id="grayscale-mode-toggle"
+              checked={isGrayscaleMode}
+              onCheckedChange={setIsGrayscaleMode}
+              className="data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted"
+            />
+            <Palette className={cn("w-6 h-6", isGrayscaleMode ? "text-primary" : "text-muted-foreground")} />
+          </div>
+           <p className="text-sm text-muted-foreground text-center max-w-md">
+            {isGrayscaleMode
+              ? 'Visuals are now in black and white.'
+              : 'Enable to simulate a grayscale display for reduced distraction.'}
           </p>
         </div>
 
@@ -95,7 +116,7 @@ export default function HomePage() {
           <Info className="h-5 w-5 text-accent" />
           <AlertTitle className="text-accent-foreground/90 font-semibold">Note on Full Functionality</AlertTitle>
           <AlertDescription className="text-accent-foreground/80">
-            For features like automatically scanning installed apps and enforcing device-level access restrictions, a native mobile application with system permissions is typically required. This web prototype demonstrates the core concept of FocusFlow.
+            For features like automatically scanning installed apps, enforcing device-level access restrictions, or system-wide grayscale, a native mobile application with system permissions is typically required. This web prototype demonstrates the core concepts.
           </AlertDescription>
         </Alert>
 
@@ -174,5 +195,4 @@ export default function HomePage() {
       </footer>
     </div>
   );
-
-    
+}
