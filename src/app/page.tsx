@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { AppCard } from '@/components/AppCard';
 import { Button } from '@/components/ui/button';
@@ -14,9 +15,12 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { USER_APPS_LIST, SYSTEM_APPS_LIST, getKidsModeApps, KidsModeIcon } from '@/lib/constants';
-import type { MockApp, CustomProfile } from '@/types';
-import { ShieldCheck, ListChecks, Eye, EyeOff, Info, Zap, Palette, UsersIcon, PlusCircle, Edit3, Trash2, PlayCircle, Save, XCircle, TimerIcon as TimerIconLucide, Lock, Unlock, ShieldAlert, StopCircle, PartyPopper } from 'lucide-react';
+import type { MockApp, CustomProfile, FocusSessionData } from '@/types';
+import { ShieldCheck, ListChecks, Eye, EyeOff, Info, Zap, Palette, UsersIcon, PlusCircle, Edit3, Trash2, PlayCircle, Save, XCircle, TimerIcon as TimerIconLucide, Lock, Unlock, ShieldAlert, StopCircle, PartyPopper, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatISO, parseISO, startOfDay } from 'date-fns';
+
+const FOCUS_SESSIONS_STORAGE_KEY = 'focusFlowSessionsLog';
 
 export default function HomePage() {
   const [selectedAppIds, setSelectedAppIds] = useState<Set<string>>(new Set());
@@ -52,13 +56,26 @@ export default function HomePage() {
   const [isFocusTimerActive, setIsFocusTimerActive] = useState(false);
   const [showFocusCongratsDialog, setShowFocusCongratsDialog] = useState(false);
   const [wasFocusModeActiveBeforeTimer, setWasFocusModeActiveBeforeTimer] = useState(false);
+  const [completedFocusTimerDuration, setCompletedFocusTimerDuration] = useState<number | null>(null);
 
 
   const { toast } = useToast();
 
   useEffect(() => {
     setMounted(true);
+    // Load custom profiles from localStorage
+    const storedProfiles = localStorage.getItem('focusFlowCustomProfiles');
+    if (storedProfiles) {
+      setCustomProfiles(JSON.parse(storedProfiles));
+    }
   }, []);
+
+  // Save custom profiles to localStorage
+  useEffect(() => {
+    if (mounted) { // Ensure this runs only after initial mount
+      localStorage.setItem('focusFlowCustomProfiles', JSON.stringify(customProfiles));
+    }
+  }, [customProfiles, mounted]);
 
   const formatTime = useCallback((totalSeconds: number | null): string => {
     if (totalSeconds === null) return '00:00';
@@ -82,6 +99,24 @@ export default function HomePage() {
     };
   }, [isKidsModeActive, kidsModeTimeRemaining, toast]);
 
+
+  const saveFocusSession = useCallback((durationMinutes: number) => {
+    try {
+      const storedSessionsRaw = localStorage.getItem(FOCUS_SESSIONS_STORAGE_KEY);
+      const sessions: FocusSessionData[] = storedSessionsRaw ? JSON.parse(storedSessionsRaw) : [];
+      
+      const newSession: FocusSessionData = {
+        date: formatISO(startOfDay(new Date())), // Store date part only for daily aggregation
+        duration: durationMinutes,
+      };
+      sessions.push(newSession);
+      localStorage.setItem(FOCUS_SESSIONS_STORAGE_KEY, JSON.stringify(sessions));
+    } catch (error) {
+      console.error("Failed to save focus session:", error);
+      toast({ title: "Error", description: "Could not save focus session data.", variant: "destructive"});
+    }
+  }, [toast]);
+
   // Focus Timer Logic
   const handleStartFocusTimer = useCallback(() => {
     if (isKidsModeActive) {
@@ -97,12 +132,14 @@ export default function HomePage() {
     if (!isFocusMode) setIsFocusMode(true);
     setIsFocusTimerActive(true);
     setFocusTimeRemaining(focusTimerDurationInput * 60);
+    setCompletedFocusTimerDuration(focusTimerDurationInput); // Store for saving
     toast({ title: "Focus Timer Started", description: `Focus session for ${focusTimerDurationInput} minutes has begun.` });
   }, [isKidsModeActive, focusTimerDurationInput, isFocusMode, toast, setIsFocusMode]);
 
   const handleStopFocusTimer = useCallback((showSuccessToast = true) => {
     setIsFocusTimerActive(false);
     setFocusTimeRemaining(null);
+    setCompletedFocusTimerDuration(null);
     if (!wasFocusModeActiveBeforeTimer) {
       setIsFocusMode(false);
     }
@@ -123,20 +160,24 @@ export default function HomePage() {
         setIsFocusMode(false);
       }
       setIsFocusTimerActive(false);
+      if (completedFocusTimerDuration && completedFocusTimerDuration > 0) {
+        saveFocusSession(completedFocusTimerDuration);
+      }
+      setCompletedFocusTimerDuration(null);
       setShowFocusCongratsDialog(true);
       toast({ title: "Focus Session Complete!", description: "Great work! Time for a break.", duration: 7000 });
     }
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [isFocusTimerActive, focusTimeRemaining, wasFocusModeActiveBeforeTimer, setIsFocusMode, toast]);
+  }, [isFocusTimerActive, focusTimeRemaining, wasFocusModeActiveBeforeTimer, setIsFocusMode, toast, completedFocusTimerDuration, saveFocusSession]);
 
 
   // Interaction Effects for Timers and Modes
   useEffect(() => {
     if (isFocusTimerActive) {
-      if (isKidsModeActive) { // If focus timer is on, kids mode should be off
-        setIsKidsModeActive(false); // This should ideally be prevented by UI, but as a safeguard
+      if (isKidsModeActive) { 
+        setIsKidsModeActive(false); 
         toast({ title: "Kid's Mode Deactivated", description: "Focus Timer is active." });
       }
     }
@@ -144,16 +185,15 @@ export default function HomePage() {
 
   useEffect(() => {
     if (isKidsModeActive) {
-      if (isFocusTimerActive) { // If kids mode is on, focus timer should be off
+      if (isFocusTimerActive) { 
          handleStopFocusTimer(false);
          toast({ title: "Focus Timer Stopped", description: "Kid's Mode activated." });
       }
-       if (isFocusMode) setIsFocusMode(false); // Kid's mode overrides focus mode
+       if (isFocusMode) setIsFocusMode(false); 
     }
   }, [isKidsModeActive, isFocusTimerActive, isFocusMode, handleStopFocusTimer, toast]);
   
   useEffect(() => {
-    // If focus mode is manually turned off while timer is running
     if (isFocusTimerActive && !isFocusMode && !wasFocusModeActiveBeforeTimer) {
         handleStopFocusTimer(false);
         toast({ title: "Focus Timer Ended", description: "Focus Mode was deactivated." });
@@ -252,7 +292,7 @@ export default function HomePage() {
   const activateProfile = (profile: CustomProfile) => {
     setSelectedAppIds(new Set(profile.appIds));
     setActiveProfileId(profile.id);
-    if (isFocusTimerActive) handleStopFocusTimer(false); // Stop timer if activating profile
+    if (isFocusTimerActive) handleStopFocusTimer(false); 
     setIsFocusMode(false); 
     toast({ title: "Profile Activated", description: `Profile "${profile.name}" is now active.` });
   };
@@ -413,9 +453,6 @@ export default function HomePage() {
                   toast({ title: "Action Disabled", description: "Kid's Mode is active.", variant: "default" });
                   return;
                 }
-                // If turning focus mode off while a timer is running, the timer's effect will handle it.
-                // If turning focus mode on, and a timer is running, it's fine.
-                // If turning focus mode on, and no timer is running, clear active profile if any.
                 if (checked && !isFocusTimerActive) {
                     setActiveProfileId(null);
                 }
@@ -483,7 +520,7 @@ export default function HomePage() {
               />
             </div>
             <Button
-              onClick={isFocusTimerActive ? handleStopFocusTimer : handleStartFocusTimer}
+              onClick={isFocusTimerActive ? () => handleStopFocusTimer(true) : handleStartFocusTimer}
               variant={isFocusTimerActive ? "outline" : "default"}
               size="lg"
               className="w-full sm:w-auto shrink-0"
@@ -524,7 +561,7 @@ export default function HomePage() {
           <Info className="h-5 w-5 text-accent" />
           <AlertTitle className="text-accent-foreground/90 font-semibold">Note on Full Functionality</AlertTitle>
           <AlertDescription className="text-accent-foreground/80">
-            For features like automatically scanning installed apps, enforcing device-level access restrictions, system-wide grayscale, or truly locking Kid's/Focus Mode, a native mobile application with system permissions is typically required. This web prototype demonstrates the core concepts and UI.
+            For features like automatically scanning installed apps, enforcing device-level access restrictions, system-wide grayscale, or truly locking Kid's/Focus Mode, a native mobile application with system permissions is typically required. This web prototype demonstrates the core concepts and UI. Data for statistics is stored locally in your browser.
           </AlertDescription>
         </Alert>
 
@@ -797,7 +834,10 @@ export default function HomePage() {
 
 
       <footer className={cn("text-center py-6 text-base text-muted-foreground border-t", isKidsModeActive && "hidden")}>
-        FocusFlow &copy; {new Date().getFullYear()}
+        <div className="flex justify-center items-center space-x-4">
+          <span>FocusFlow &copy; {new Date().getFullYear()}</span>
+          <Link href="/stats" legacyBehavior><a className="text-primary hover:underline flex items-center"><BarChart3 className="mr-1 h-4 w-4" />View Stats</a></Link>
+        </div>
       </footer>
     </div>
   );
