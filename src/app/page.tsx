@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { USER_APPS_LIST, SYSTEM_APPS_LIST, getKidsModeApps, KidsModeIcon } from '@/lib/constants';
 import type { MockApp, CustomProfile } from '@/types';
-import { ShieldCheck, ListChecks, Eye, EyeOff, Info, Zap, Palette, UsersIcon, PlusCircle, Edit3, Trash2, PlayCircle, Save, XCircle, Timer as TimerIcon, Lock, Unlock, ShieldAlert } from 'lucide-react';
+import { ShieldCheck, ListChecks, Eye, EyeOff, Info, Zap, Palette, UsersIcon, PlusCircle, Edit3, Trash2, PlayCircle, Save, XCircle, TimerIcon as TimerIconLucide, Lock, Unlock, ShieldAlert, StopCircle, PartyPopper } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function HomePage() {
@@ -39,18 +39,32 @@ export default function HomePage() {
   const [isKidsModePasswordSet, setIsKidsModePasswordSet] = useState(false);
   const [showKidsModeSetupDialog, setShowKidsModeSetupDialog] = useState(false);
   const [showKidsModeExitDialog, setShowKidsModeExitDialog] = useState(false);
-  const [kidsModeTimerDuration, setKidsModeTimerDuration] = useState(30); // Default 30 mins
-  const [kidsModeTimeRemaining, setKidsModeTimeRemaining] = useState<number | null>(null); // in seconds
-  const [kidsModePasswordInput, setKidsModePasswordInput] = useState(''); // for exit dialog
-  const [tempKidsModePassword, setTempKidsModePassword] = useState(''); // for setup dialog
-  const [tempKidsModeTimerDuration, setTempKidsModeTimerDuration] = useState(30); // for setup dialog
+  const [kidsModeTimerDuration, setKidsModeTimerDuration] = useState(30); 
+  const [kidsModeTimeRemaining, setKidsModeTimeRemaining] = useState<number | null>(null); 
+  const [kidsModePasswordInput, setKidsModePasswordInput] = useState(''); 
+  const [tempKidsModePassword, setTempKidsModePassword] = useState(''); 
+  const [tempKidsModeTimerDuration, setTempKidsModeTimerDuration] = useState(30); 
   const kidsModeAllowedApps = useMemo(() => getKidsModeApps(), []);
+
+  // Focus Timer State
+  const [focusTimerDurationInput, setFocusTimerDurationInput] = useState(25); // Default 25 minutes
+  const [focusTimeRemaining, setFocusTimeRemaining] = useState<number | null>(null); // in seconds
+  const [isFocusTimerActive, setIsFocusTimerActive] = useState(false);
+  const [showFocusCongratsDialog, setShowFocusCongratsDialog] = useState(false);
+  const [wasFocusModeActiveBeforeTimer, setWasFocusModeActiveBeforeTimer] = useState(false);
 
 
   const { toast } = useToast();
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  const formatTime = useCallback((totalSeconds: number | null): string => {
+    if (totalSeconds === null) return '00:00';
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   }, []);
 
   // Kid's Mode Timer Logic
@@ -67,6 +81,84 @@ export default function HomePage() {
       if (intervalId) clearInterval(intervalId);
     };
   }, [isKidsModeActive, kidsModeTimeRemaining, toast]);
+
+  // Focus Timer Logic
+  const handleStartFocusTimer = useCallback(() => {
+    if (isKidsModeActive) {
+      toast({ title: "Action Disabled", description: "Kid's Mode is active. Disable it to start the Focus Timer.", variant: "default" });
+      return;
+    }
+    if (focusTimerDurationInput <= 0) {
+      toast({ title: "Invalid Duration", description: "Timer duration must be greater than 0 minutes.", variant: "destructive" });
+      return;
+    }
+
+    setWasFocusModeActiveBeforeTimer(isFocusMode);
+    if (!isFocusMode) setIsFocusMode(true);
+    setIsFocusTimerActive(true);
+    setFocusTimeRemaining(focusTimerDurationInput * 60);
+    toast({ title: "Focus Timer Started", description: `Focus session for ${focusTimerDurationInput} minutes has begun.` });
+  }, [isKidsModeActive, focusTimerDurationInput, isFocusMode, toast, setIsFocusMode]);
+
+  const handleStopFocusTimer = useCallback((showSuccessToast = true) => {
+    setIsFocusTimerActive(false);
+    setFocusTimeRemaining(null);
+    if (!wasFocusModeActiveBeforeTimer) {
+      setIsFocusMode(false);
+    }
+    if (showSuccessToast) {
+      toast({ title: "Focus Timer Stopped" });
+    }
+  }, [wasFocusModeActiveBeforeTimer, setIsFocusMode, toast]);
+
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+    if (isFocusTimerActive && focusTimeRemaining !== null && focusTimeRemaining > 0) {
+      intervalId = setInterval(() => {
+        setFocusTimeRemaining((prevTime) => (prevTime ? Math.max(0, prevTime - 1) : 0));
+      }, 1000);
+    } else if (isFocusTimerActive && focusTimeRemaining === 0) {
+      // Timer finished
+      if (!wasFocusModeActiveBeforeTimer) {
+        setIsFocusMode(false);
+      }
+      setIsFocusTimerActive(false);
+      setShowFocusCongratsDialog(true);
+      toast({ title: "Focus Session Complete!", description: "Great work! Time for a break.", duration: 7000 });
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isFocusTimerActive, focusTimeRemaining, wasFocusModeActiveBeforeTimer, setIsFocusMode, toast]);
+
+
+  // Interaction Effects for Timers and Modes
+  useEffect(() => {
+    if (isFocusTimerActive) {
+      if (isKidsModeActive) { // If focus timer is on, kids mode should be off
+        setIsKidsModeActive(false); // This should ideally be prevented by UI, but as a safeguard
+        toast({ title: "Kid's Mode Deactivated", description: "Focus Timer is active." });
+      }
+    }
+  }, [isFocusTimerActive, isKidsModeActive, toast]);
+
+  useEffect(() => {
+    if (isKidsModeActive) {
+      if (isFocusTimerActive) { // If kids mode is on, focus timer should be off
+         handleStopFocusTimer(false);
+         toast({ title: "Focus Timer Stopped", description: "Kid's Mode activated." });
+      }
+       if (isFocusMode) setIsFocusMode(false); // Kid's mode overrides focus mode
+    }
+  }, [isKidsModeActive, isFocusTimerActive, isFocusMode, handleStopFocusTimer, toast]);
+  
+  useEffect(() => {
+    // If focus mode is manually turned off while timer is running
+    if (isFocusTimerActive && !isFocusMode && !wasFocusModeActiveBeforeTimer) {
+        handleStopFocusTimer(false);
+        toast({ title: "Focus Timer Ended", description: "Focus Mode was deactivated." });
+    }
+  }, [isFocusMode, isFocusTimerActive, wasFocusModeActiveBeforeTimer, handleStopFocusTimer, toast]);
 
 
   const handleToggleAppSelectionForPage = useCallback((appId: string) => {
@@ -94,9 +186,9 @@ export default function HomePage() {
 
   const renderAppGrid = useCallback((
     apps: MockApp[],
-    isFocusView: boolean, // In focus mode or kids mode, selection is disabled
+    isFocusView: boolean, 
     currentSelection: Set<string>,
-    onToggle?: (appId: string) => void, // Optional for views where toggle is not allowed
+    onToggle?: (appId: string) => void, 
     selectableSystemApps: boolean = false,
     isKidsModeGrid: boolean = false
   ) => (
@@ -107,8 +199,8 @@ export default function HomePage() {
           app={app}
           isSelected={currentSelection.has(app.id)}
           onToggleSelection={!isFocusView && onToggle && (selectableSystemApps || !app.isSystemApp) ? onToggle : undefined}
-          isFocusModeView={isFocusView} // True for focus mode or kids mode active view
-          disabled={(!selectableSystemApps && app.isSystemApp && !isFocusView && !onToggle) || (isFocusView)} // Disabled if system app and not selectable, or if in focus/kids view
+          isFocusModeView={isFocusView} 
+          disabled={(!selectableSystemApps && app.isSystemApp && !isFocusView && !onToggle) || (isFocusView)} 
           isKidsModeCard={isKidsModeGrid}
         />
       ))}
@@ -160,7 +252,8 @@ export default function HomePage() {
   const activateProfile = (profile: CustomProfile) => {
     setSelectedAppIds(new Set(profile.appIds));
     setActiveProfileId(profile.id);
-    setIsFocusMode(false); // Ensure focus mode is off
+    if (isFocusTimerActive) handleStopFocusTimer(false); // Stop timer if activating profile
+    setIsFocusMode(false); 
     toast({ title: "Profile Activated", description: `Profile "${profile.name}" is now active.` });
   };
 
@@ -175,10 +268,9 @@ export default function HomePage() {
     setProfileToDelete(null);
   };
 
-  // Kid's Mode Functions
   const handleOpenKidsModeSetup = () => {
-    if (isFocusMode) {
-      toast({ title: "Action Disabled", description: "Disable Focus Mode to activate Kid's Mode.", variant: "default" });
+    if (isFocusMode || isFocusTimerActive) {
+      toast({ title: "Action Disabled", description: "Disable Focus Mode/Timer to activate Kid's Mode.", variant: "default" });
       return;
     }
     setTempKidsModePassword('');
@@ -204,11 +296,12 @@ export default function HomePage() {
   };
   
   const startKidsMode = (durationMinutes: number) => {
+    if (isFocusTimerActive) handleStopFocusTimer(false);
     setIsKidsModeActive(true);
     setKidsModeTimeRemaining(durationMinutes * 60);
-    setIsFocusMode(false); // Ensure focus mode is turned off
-    setSelectedAppIds(new Set()); // Clear general selections
-    setActiveProfileId(null); // Deactivate any active profile
+    setIsFocusMode(false); 
+    setSelectedAppIds(new Set()); 
+    setActiveProfileId(null); 
     toast({ title: "Kid's Mode Activated", description: "Enjoy a safe and focused experience!" });
   };
 
@@ -228,13 +321,6 @@ export default function HomePage() {
       toast({ title: "Incorrect Password", description: "Please try again.", variant: "destructive" });
       setKidsModePasswordInput('');
     }
-  };
-
-  const formatTime = (totalSeconds: number | null): string => {
-    if (totalSeconds === null) return '00:00';
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
   };
 
 
@@ -258,7 +344,7 @@ export default function HomePage() {
         <h1 className="text-5xl font-bold mb-4">Kid's Mode</h1>
         {kidsModeTimeRemaining !== null && kidsModeTimeRemaining > 0 && (
           <div className="mb-8 p-4 bg-white/20 rounded-lg shadow-xl">
-            <TimerIcon className="w-10 h-10 text-yellow-300 mb-2 mx-auto" />
+            <TimerIconLucide className="w-10 h-10 text-yellow-300 mb-2 mx-auto" />
             <p className="text-4xl font-bold text-center">{formatTime(kidsModeTimeRemaining)}</p>
             <p className="text-center text-sm">Time Remaining</p>
           </div>
@@ -327,10 +413,13 @@ export default function HomePage() {
                   toast({ title: "Action Disabled", description: "Kid's Mode is active.", variant: "default" });
                   return;
                 }
-                setIsFocusMode(checked);
-                if (checked) {
-                  setActiveProfileId(null); // Deactivate profile if manually toggling focus mode
+                // If turning focus mode off while a timer is running, the timer's effect will handle it.
+                // If turning focus mode on, and a timer is running, it's fine.
+                // If turning focus mode on, and no timer is running, clear active profile if any.
+                if (checked && !isFocusTimerActive) {
+                    setActiveProfileId(null);
                 }
+                setIsFocusMode(checked);
               }}
               className="data-[state=checked]:bg-primary data-[state=unchecked]:bg-muted"
               disabled={isKidsModeActive}
@@ -339,9 +428,11 @@ export default function HomePage() {
           </div>
           <p className="text-base text-muted-foreground text-center max-w-lg mb-6">
             {isFocusMode
-              ? activeProfileId && customProfiles.find(p => p.id === activeProfileId)
-                ? `Focusing with "${customProfiles.find(p => p.id === activeProfileId)?.name}" profile. Only whitelisted apps are accessible.`
-                : 'Only whitelisted apps and essential system services are accessible. Enjoy your focused session!'
+              ? isFocusTimerActive 
+                ? `Focus Timer active. Only whitelisted apps accessible for ${formatTime(focusTimeRemaining)}.`
+                : activeProfileId && customProfiles.find(p => p.id === activeProfileId)
+                  ? `Focusing with "${customProfiles.find(p => p.id === activeProfileId)?.name}" profile. Only whitelisted apps are accessible.`
+                  : 'Only whitelisted apps and essential system services are accessible. Enjoy your focused session!'
               : 'Toggle the switch to enter Focus Mode. Select applications or activate a profile below.'}
           </p>
           <div className="flex items-center space-x-4 mb-3">
@@ -363,6 +454,50 @@ export default function HomePage() {
               : 'Enable to simulate a grayscale display for reduced distraction.'}
           </p>
         </div>
+
+        {/* Focus Timer Section */}
+        <div className="mb-10 p-8 bg-card rounded-xl shadow-lg border border-border">
+          <div className="flex items-center mb-4">
+            <TimerIconLucide className="w-8 h-8 mr-3 text-primary" />
+            <h2 className="text-2xl font-semibold text-foreground">Focus Timer</h2>
+          </div>
+          {isFocusTimerActive && focusTimeRemaining !== null && (
+            <div className="text-center mb-6">
+              <p className="text-5xl font-bold text-primary">{formatTime(focusTimeRemaining)}</p>
+              <p className="text-muted-foreground mt-1">Time Remaining</p>
+            </div>
+          )}
+          <div className="flex flex-col sm:flex-row items-end gap-4">
+            <div className="flex-grow w-full sm:w-auto">
+              <Label htmlFor="focus-timer-duration" className="mb-1 block text-sm font-medium text-foreground">
+                Duration (minutes)
+              </Label>
+              <Input
+                id="focus-timer-duration"
+                type="number"
+                value={focusTimerDurationInput}
+                onChange={(e) => setFocusTimerDurationInput(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                min="1"
+                className="w-full"
+                disabled={isFocusTimerActive || isKidsModeActive}
+              />
+            </div>
+            <Button
+              onClick={isFocusTimerActive ? handleStopFocusTimer : handleStartFocusTimer}
+              variant={isFocusTimerActive ? "outline" : "default"}
+              size="lg"
+              className="w-full sm:w-auto shrink-0"
+              disabled={isKidsModeActive}
+            >
+              {isFocusTimerActive ? <StopCircle className="mr-2 h-5 w-5" /> : <PlayCircle className="mr-2 h-5 w-5" />}
+              {isFocusTimerActive ? 'Stop Timer' : 'Start Timer'}
+            </Button>
+          </div>
+           {isFocusMode && isFocusTimerActive && (
+            <p className="text-sm text-green-600 mt-3 text-center sm:text-left">Focus Mode is active with the timer.</p>
+          )}
+           {isKidsModeActive && <p className="text-sm text-destructive mt-3 text-center sm:text-left">Kid's Mode is active. Disable it to use Focus Timer.</p>}
+        </div>
         
         {/* Kid's Mode Activation Section */}
         <div className="mb-12 p-6 bg-card rounded-xl shadow-md border border-border">
@@ -375,13 +510,13 @@ export default function HomePage() {
               onClick={isKidsModePasswordSet ? () => startKidsMode(kidsModeTimerDuration) : handleOpenKidsModeSetup} 
               variant="default" 
               size="lg"
-              disabled={isFocusMode}
+              disabled={isFocusMode || isFocusTimerActive}
               className="bg-gradient-to-r from-pink-500 to-yellow-500 hover:from-pink-600 hover:to-yellow-600 text-white transition-all"
             >
               {isKidsModePasswordSet ? 'Start Kid\'s Mode' : 'Setup Kid\'s Mode'}
             </Button>
           </div>
-           {isFocusMode && <p className="text-sm text-destructive mt-2 text-center sm:text-right">Disable Focus Mode to use Kid's Mode.</p>}
+           {(isFocusMode || isFocusTimerActive) && <p className="text-sm text-destructive mt-2 text-center sm:text-right">Disable Focus Mode/Timer to use Kid's Mode.</p>}
         </div>
 
 
@@ -389,7 +524,7 @@ export default function HomePage() {
           <Info className="h-5 w-5 text-accent" />
           <AlertTitle className="text-accent-foreground/90 font-semibold">Note on Full Functionality</AlertTitle>
           <AlertDescription className="text-accent-foreground/80">
-            For features like automatically scanning installed apps, enforcing device-level access restrictions, system-wide grayscale, or truly locking Kid's Mode, a native mobile application with system permissions is typically required. This web prototype demonstrates the core concepts and UI.
+            For features like automatically scanning installed apps, enforcing device-level access restrictions, system-wide grayscale, or truly locking Kid's/Focus Mode, a native mobile application with system permissions is typically required. This web prototype demonstrates the core concepts and UI.
           </AlertDescription>
         </Alert>
 
@@ -399,7 +534,7 @@ export default function HomePage() {
               <UsersIcon className="w-7 h-7 mr-3 text-primary" />
               Custom Profiles
             </h2>
-            <Button onClick={handleOpenCreateProfileDialog} variant="outline" size="sm" disabled={isKidsModeActive || isFocusMode}>
+            <Button onClick={handleOpenCreateProfileDialog} variant="outline" size="sm" disabled={isKidsModeActive || isFocusMode || isFocusTimerActive}>
               <PlusCircle className="mr-2 h-4 w-4" /> Create Profile
             </Button>
           </div>
@@ -425,19 +560,23 @@ export default function HomePage() {
                            toast({ title: "Action Disabled", description: "Kid's Mode is active.", variant: "default" });
                            return;
                         }
+                        if (isFocusTimerActive) {
+                           toast({ title: "Action Disabled", description: "Focus Timer is active. Stop it to change profiles.", variant: "default" });
+                           return;
+                        }
                         activeProfileId === profile.id ? setActiveProfileId(null) : activateProfile(profile)
                       }}
                       className="w-28"
-                      disabled={isKidsModeActive}
+                      disabled={isKidsModeActive || isFocusTimerActive}
                     >
                       {activeProfileId === profile.id ? <XCircle className="mr-2 h-4 w-4" /> : <PlayCircle className="mr-2 h-4 w-4" />}
                       {activeProfileId === profile.id ? 'Deactivate' : 'Activate'}
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleOpenEditProfileDialog(profile)} aria-label="Edit profile" disabled={isKidsModeActive || isFocusMode}>
+                    <Button variant="ghost" size="icon" onClick={() => handleOpenEditProfileDialog(profile)} aria-label="Edit profile" disabled={isKidsModeActive || isFocusMode || isFocusTimerActive}>
                       <Edit3 className="h-5 w-5 text-muted-foreground hover:text-primary" />
                     </Button>
                     <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="icon" onClick={() => setProfileToDelete(profile)} aria-label="Delete profile" disabled={isKidsModeActive || isFocusMode}>
+                      <Button variant="ghost" size="icon" onClick={() => setProfileToDelete(profile)} aria-label="Delete profile" disabled={isKidsModeActive || isFocusMode || isFocusTimerActive}>
                         <Trash2 className="h-5 w-5 text-muted-foreground hover:text-destructive" />
                       </Button>
                     </AlertDialogTrigger>
@@ -451,10 +590,10 @@ export default function HomePage() {
         <div 
           className={cn(
             "transition-opacity duration-500 ease-in-out",
-            (isFocusMode || isKidsModeActive) ? 'animate-fade-out opacity-0 hidden' : 'animate-fade-in opacity-100 block'
+            (isFocusMode || isKidsModeActive || isFocusTimerActive) ? 'animate-fade-out opacity-0 hidden' : 'animate-fade-in opacity-100 block'
           )}
         >
-          {!isFocusMode && !isKidsModeActive && (
+          {!isFocusMode && !isKidsModeActive && !isFocusTimerActive && (
             <>
               <div className="mb-12">
                  <div className="flex justify-between items-center mb-2">
@@ -499,14 +638,16 @@ export default function HomePage() {
             isFocusMode && !isKidsModeActive ? 'animate-fade-in opacity-100 block' : 'animate-fade-out opacity-0 hidden'
           )}
         >
-          {isFocusMode && !isKidsModeActive &&(
+          {isFocusMode && !isKidsModeActive && (
             <div className="mt-8 p-8 bg-card rounded-xl shadow-lg border">
               <div className="mb-8">
                 <h2 className="text-3xl font-bold mb-2 flex items-center text-primary">
                   <ListChecks className="w-8 h-8 mr-3" />
-                  Whitelisted Apps
+                  Whitelisted Apps {isFocusTimerActive ? `(Timer Active: ${formatTime(focusTimeRemaining)})` : ""}
                 </h2>
-                 <p className="text-muted-foreground mb-6 text-lg">Your selected apps for focused work.</p>
+                 <p className="text-muted-foreground mb-6 text-lg">
+                    {isFocusTimerActive ? "Your selected apps for this timed focus session." : "Your selected apps for focused work."}
+                 </p>
                 {whitelistedApps.length > 0 ? (
                   renderAppGrid(whitelistedApps, true, selectedAppIds)
                 ) : (
@@ -635,6 +776,25 @@ export default function HomePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Focus Timer Congratulations Dialog */}
+      <Dialog open={showFocusCongratsDialog} onOpenChange={setShowFocusCongratsDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="items-center text-center pt-6">
+            <PartyPopper className="w-16 h-16 text-primary mb-4" />
+            <DialogTitle className="text-2xl font-bold">Focus Session Complete!</DialogTitle>
+          </DialogHeader>
+          <p className="text-center text-muted-foreground py-4 text-base">
+            Great job on staying focused! You've earned a well-deserved break.
+          </p>
+          <DialogFooter className="sm:justify-center pb-6">
+            <DialogClose asChild>
+              <Button type="button" size="lg">Awesome!</Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       <footer className={cn("text-center py-6 text-base text-muted-foreground border-t", isKidsModeActive && "hidden")}>
         FocusFlow &copy; {new Date().getFullYear()}
